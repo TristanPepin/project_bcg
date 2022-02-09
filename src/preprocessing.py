@@ -45,34 +45,43 @@ def generate_template_df():
 def generate_df(max_rows = 1e6):
 
     if os.path.exists('./data/final_df.csv'):
-        return pd.read_csv('./data/final_df.csv')
+        df = pd.read_csv('./data/final_df.csv')
+    else :
 
-    if not os.path.exists('./data/list_clients.txt'):
-        generate_list()
+        if not os.path.exists('./data/list_clients.txt'):
+            generate_list()
 
-    df = generate_template_df()
-    n_rows = len(df)
+        df = generate_template_df()
+        n_rows = len(df)
 
-    raw_df = generate_template_df()
+        raw_df = generate_template_df()
 
-    for steps in tqdm(range(int(NB_DATA/max_rows))):
+        for steps in tqdm(range(int(NB_DATA/max_rows))):
 
-        df_temp = loading.load_data(nrows=max_rows,skiprows=steps*max_rows)
-        generate_datecols(df_temp)
-        df_temp = df_temp[COLS_USED].groupby(['client_id','year','quarter']).sum()
+            df_temp = loading.load_data(nrows=max_rows,skiprows=steps*max_rows)
+            generate_datecols(df_temp)
+            df_temp = df_temp[COLS_USED].groupby(['client_id','year','quarter']).sum()
 
-        if not steps :
-            df.update(df_temp)
-        else :
-            raw_temp = raw_df.copy()
-            raw_temp.update(df_temp)
+            if not steps :
+                df.update(df_temp)
+            else :
+                raw_temp = raw_df.copy()
+                raw_temp.update(df_temp)
 
-            df.fillna(0,inplace=True)
-            raw_temp.fillna(0,inplace=True)
+                df.fillna(0,inplace=True)
+                raw_temp.fillna(0,inplace=True)
 
-            df = df.add(raw_temp)
+                df = df.add(raw_temp)
 
-    df.to_csv('./data/final_df.csv')
+
+    # Delete clients that have already churned :
+    churn_filter = df[(df.year == 2019) & (df.quarter<=NB_QUARTER_CHURNER)][['client_id','sales_net']].groupby('client_id').sum()
+    to_drop = churn_filter[churn_filter.sales_net == 0].index
+    df.set_index(['client_id']).drop(to_drop).reset_index()
+    df.to_csv('./data/final_df.csv',index=False)
+
+    list_client = list(np.sort(np.loadtxt(loading.PATH_DATA + 'list_clients.txt',dtype=int)))
+    np.savetxt('./data/list_clients.txt',df.client_id.unique())
 
     return df.reset_index()
 
@@ -109,3 +118,33 @@ def generate_training_data(df,return_all = False,verbose=1,nb_clients = None):
     if verbose : print("X shape : {}".format(X.shape))
         
     return X,np.array(y)
+
+
+def generate_client_infos():
+
+    if os.path.exists(loading.PATH_DATA+'data_client.csv'):
+        return pd.read_csv(loading.PATH_DATA+'data_client.csv')
+    df = loading.load_data()
+    df.date_order = pd.to_datetime(df.date_order)
+    df_client = df[['client_id','product_id','date_order']].groupby(['client_id','date_order']).count().reset_index()
+    df_sales = df_client.reset_index()[['client_id','product_id']].groupby('client_id').agg(mean_prod_per_com = ('product_id','mean'),
+                                                                             max_order_per_com = ('product_id','max'))
+
+    time_difference = df_client.date_order - df_client[['client_id','date_order']].groupby('client_id').shift(1).date_order
+    df_client['time_difference'] = time_difference
+
+    df_temporal = df_client[['client_id','time_difference']].groupby('client_id').agg(mean_time_difference = ('time_difference','mean'),
+                                                                                  max_time_difference = ('time_difference','max')).dropna().reset_index()
+    df_temporal.max_time_difference = df_temporal.max_time_difference.dt.days
+    df_temporal.mean_time_difference = df_temporal.mean_time_difference.dt.days
+
+    df_add = df_sales.merge(df_temporal,on='client_id',how='left')
+
+    df_client = df[['sales_net','quantity','client_id']].groupby('client_id').agg(mean_quantity = ('quantity','mean'),
+                                                                              max_quantity = ('quantity','max'),
+                                                                              mean_sales = ('sales_net','mean'),
+                                                                              max_sales = ('sales_net','max'))
+
+    df = df_client.reset_index().merge(df_add,on='client_id',how='left').set_index('client_id')
+    df.to_csv(loading.PATH_DATA+'data_client.csv')
+    return df
