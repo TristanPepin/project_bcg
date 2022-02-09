@@ -112,7 +112,6 @@ def find_threshold(model,df,n_thre = 5):
     plt.ylabel('Cost')
     plt.title('Best threshold : {}'.format(vec_threshold[np.argmin(cost)]))
     plt.show()
-    plt.savefig('Threshold.png')
    
     return vec_threshold[np.argmin(cost)]
 
@@ -136,7 +135,6 @@ def find_threshold_f1(model,df,n_thre = 50):
     plt.ylabel('Cost')
     plt.title('Best threshold : {}'.format(vec_threshold[np.argmax(cost)]))
     plt.show()
-    plt.savefig('Threshold.png')
    
     return vec_threshold[np.argmax(cost)]
 

@@ -11,7 +11,7 @@ from src import loading
 COLS_USED = ['client_id','sales_net','quantity','year','quarter']
 FINAL_COLS = ['sales_net','quantity']
 NB_DATA = 63319315
-NB_QUARTER_CHURNER = 3
+NB_QUARTER_CHURNER = 2
 NB_SKIP_BEG = 2
 
 
@@ -77,21 +77,27 @@ def generate_df(max_rows = 1e6):
     return df.reset_index()
 
 
-def generate_training_data(df,return_all = False):
+def generate_training_data(df,return_all = False,verbose=1,nb_clients = None):
 
-    list_client = list(np.sort(np.loadtxt(loading.PATH_DATA + 'list_clients.txt',dtype=int)))
+    if nb_clients is None :
+        list_client = list(np.sort(np.loadtxt(loading.PATH_DATA + 'list_clients.txt',dtype=int)))
+        nb_clients = len(list_client)
+
     list_year = list(np.sort(np.loadtxt(loading.PATH_DATA + 'list_year.txt',dtype=int)))
     list_quarter = list(np.sort(np.loadtxt(loading.PATH_DATA + 'list_quarter.txt',dtype=int)))
-
-    nb_clients = len(list_client)
     nb_ts = len(list_year)*len(list_quarter)
     data = []
 
     y = []
     X = df[FINAL_COLS].values
 
-    print('Generating churn labels...')
-    for i in tqdm(range(nb_clients)) :
+    if verbose :
+        print('Generating churn labels...')
+        iter = tqdm(range(nb_clients))
+    else :
+        iter = range(nb_clients)
+
+    for i in iter :
         y.append(0) if np.sum(X[i*12:(i+1)*12,-1][-NB_QUARTER_CHURNER:]) else y.append(1)
 
     if not return_all :
@@ -100,6 +106,6 @@ def generate_training_data(df,return_all = False):
         X = X.reshape((nb_clients,nb_ts,len(FINAL_COLS)))[:,NB_SKIP_BEG:,:]
 
 
-    print("X shape : {}".format(X.shape))
+    if verbose : print("X shape : {}".format(X.shape))
         
     return X,np.array(y)
