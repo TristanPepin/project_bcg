@@ -20,7 +20,7 @@ ax.legend()
 ax.set_xlabel('Year')
 
 
-proba_churn = model.predict(X[:,-7:,:])
+proba_churn = model.predict(X[:,-8:,:])
 
 st.text("Proba of churn : {}".format(proba_churn[0][0]))
 st.pyplot(fig)
