@@ -3,7 +3,6 @@ import pandas as pd
 import itertools
 import os
 from tqdm import tqdm
-
 from src import loading
 
 
@@ -13,7 +12,6 @@ FINAL_COLS = ['sales_net','quantity']
 NB_DATA = 63319315
 NB_QUARTER_CHURNER = 2
 NB_SKIP_BEG = 2
-
 
 def generate_datecols(df):
     df.date_order = pd.to_datetime(df.date_order)

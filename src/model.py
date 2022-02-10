@@ -1,19 +1,13 @@
-from tokenize import Name
 import tensorflow as tf
-from src import preprocessing, loading
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score, roc_curve, roc_auc_score
 import numpy as np
 from tqdm import tqdm
 import os
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning) 
 
-import matplotlib.pyplot as plt
 
-NB_FEATURES = 2
-NB_TS = 12 
-DISCOUNT_FACTOR = 0.5
-PROMOTION_RATE = 0.2
-NB_SKIP_BEG = 2
+from src import preprocessing, loading,metrics, visualization
 
 def generate_model():
 
@@ -49,126 +43,78 @@ def fit_churn_model(df,epochs=10,name='churn_model'):
 
     yh = (model.predict(X_test) > 0.5).astype(int)
 
-    print("F1 score : {}".format(f1_score(y_test,yh)))
-    print("Accuracy score : {}".format(accuracy_score(y_test,yh)))
-    print("Recall score : {}".format(recall_score(y_test,yh)))
-    print("Precision score : {}".format(precision_score(y_test,yh)))
-
-    plt.figure()
-    plt.plot(history.history['loss'],label='loss')
-    plt.plot(history.history['val_loss'],label='val_loss')
-    plt.legend()
-    plt.xlabel('Epoch')
-    plt.ylabel('Entropy')
-    plt.show()
-
+    metrics.print_scores(y_test,yh)
+    if epochs > 1 : visualization.plot_history(history,name)
 
     # Complete training on the all dataset
-    model.fit(X,y,epochs=5)
+    model.fit(X_test,y_test,epochs=epochs)
 
-    if not os.path.exists(loading.PATH_MODELS):
-        os.mkdir(loading.PATH_MODELS)
-    model.save(loading.PATH_MODELS + name)
+    try :
+        if not os.path.exists(loading.PATH_MODELS):
+            os.mkdir(loading.PATH_MODELS)
+        model.save(loading.PATH_MODELS + name)
 
-    if not os.path.exists(loading.PATH_MODELS + name + '/history.png'):
-        plt.savefig(loading.PATH_MODELS + name + '/history.png')
-
-
+    except :
+        print("Problems saving the model...")
 
     return model
-    
+
 
 
 def find_threshold(model,df,n_thre = 5):
 
-    X,y = preprocessing.generate_training_data(df,return_all=True)
-    promotion_cost = []
+    X,y = preprocessing.generate_training_data(df,return_all=True,verbose=False)
+
+    client_value = []
     future_value = []
+
     for ind in range(len(X)) :
-        promotion_cost.append(np.max(X[ind,-preprocessing.NB_QUARTER_CHURNER:,0]))
-        future_value.append(np.mean(X[ind,:,0],where=X[ind,:,0]>0))
+        client_value.append(np.mean(X[ind,:,0],where=X[ind,:,0]>0))
+        future_value.append(np.mean(X[ind,-preprocessing.NB_QUARTER_CHURNER:,0],where=X[ind,-preprocessing.NB_QUARTER_CHURNER:,0]>0))
 
     future_value=np.nan_to_num(future_value)
-    promotion_cost = PROMOTION_RATE*np.array(promotion_cost)
+    client_value=np.nan_to_num(client_value)
 
-    future_value = future_value/max(future_value)
-    promotion_cost = promotion_cost/max(promotion_cost)
+    tp_gain = (1-metrics.PROMOTION_RATE)*client_value*metrics.PROBA_CONVERT_PROMOTION
+    fp_cost = metrics.PROMOTION_RATE*future_value
+
 
     X = X[:,:-preprocessing.NB_QUARTER_CHURNER,:]
 
     vec_threshold = np.linspace(0.1,0.9,n_thre)
-    cost = []
+    gain = []
     bar = tqdm(vec_threshold)
 
     for thre in bar:
         bar.set_description('Thresh {}'.format(thre))
-        yh = (model.predict(X)>thre).astype(int)
+        yh = (model.predict(X)>thre).astype(int).squeeze()
         fp = np.where((yh != y)&(yh==1))[0]
-        fn = np.where((yh != y)&(yh==0))[0]
-        cost.append(np.sum(future_value[fn])+np.sum(promotion_cost[fp]))
-         
-    plt.plot(vec_threshold,cost)
-    plt.xlabel('Threshold')
-    plt.ylabel('Cost')
-    plt.title('Best threshold : {}'.format(vec_threshold[np.argmin(cost)]))
-    plt.show()
-   
-    return vec_threshold[np.argmin(cost)]
+        tp = np.where((yh == y)&(y==1))[0]
+        gain.append((np.sum(tp_gain[tp])-np.sum(fp_cost[fp]))/len(X))
+
+    print('Mean gain per client using our approach : {}'.format(np.max(gain)))
+    visualization.plot_gain_threshold(vec_threshold,gain) 
+
+    return vec_threshold[np.argmax(gain)]
 
 
+def evaluate_model(df,name = 'churn_model',n_thre = 50):
+    model = loading.load_model(name=name)
+    X,y = preprocessing.generate_training_data(df,return_all=False,verbose=False)
 
-def find_threshold_f1(model,df,n_thre = 50):
+    proba_churn = model.predict(X)
+    print('AUC : {}'.format(metrics.roc_auc_score(y,proba_churn)))
+    fpr,tpr = metrics.compute_rates(y,proba_churn)
 
-    X,y = preprocessing.generate_training_data(df,return_all=False)
+    visualization.plot_ROC_curve(fpr,tpr,name)
 
-    vec_threshold = np.linspace(0.1,0.9,n_thre)
-    cost = []
-    bar = tqdm(vec_threshold)
-
-    for thre in bar:
-        bar.set_description('Thresh {}'.format(thre))
-        yh = (model.predict(X)>thre).astype(int)
-        cost.append(f1_score(y,yh))
-         
-    plt.plot(vec_threshold,cost)
-    plt.xlabel('Threshold')
-    plt.ylabel('Cost')
-    plt.title('Best threshold : {}'.format(vec_threshold[np.argmax(cost)]))
-    plt.show()
-   
-    return vec_threshold[np.argmax(cost)]
-
-
-def evaluate_model(df,name = 'churn_model'):
-    try :
-        model = loading.load_model(name=name)
-        X,y = preprocessing.generate_training_data(df,return_all=False)
-
-        proba_churn = model.predict(X)
-
-        fpr,tpr,_ = roc_curve(y,proba_churn)
-
-        plt.figure()
-        plt.plot(fpr,tpr)
-        plt.xlabel('FRP')
-        plt.ylabel('TRP')
-        plt.title('ROC CURVE')
-        plt.savefig(loading.PATH_MODELS + name + 'roc_curve')
-        plt.show();
-
-        print('AUC : {}'.format(roc_auc_score(y,proba_churn)))
-
-        print('Choosing threshold that maximizes f1 score...')
-        thre = find_threshold_f1(model,df,n_thre = 10)
-        yh = (proba_churn > thre).astype(int)
-        
-        print("F1 score : {}".format(f1_score(y,yh)))
-        print("Accuracy score : {}".format(accuracy_score(y,yh)))
-        print("Recall score : {}".format(recall_score(y,yh)))
-        print("Precision score : {}".format(precision_score(y,yh)))
-
-    except :
-        model = fit_churn_model(df,fit_churn_model)
+    print('Choosing threshold that maximizes expected revenues...')
+    thre = find_threshold(model,df,n_thre)
+    print('Labelling churn if proba > {:.2f}'.format(thre))
+    yh = (proba_churn > thre).astype(int)
+    cf_matrix = metrics.compute_confusion_matrix(y,yh)
+    visualization.plot_confusion_matrix(cf_matrix)
+    metrics.print_scores(y,yh)
 
 
 def print_info_model(name = 'churn_model'):
