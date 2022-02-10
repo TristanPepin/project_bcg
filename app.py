@@ -31,7 +31,10 @@ df_client['ts'] = ts
 df_infos_client = df_infos[df_infos.client_id == user_input]
 
 X,y = src.generate_training_data(df_client,return_all=True,verbose=0,nb_clients=1)
-proba_churn = model.predict(X[:,-8:,:])
+proba_churn = model.predict(X[:,-9:-1,:])
+
+# filtering last data for plot, always null
+df_client = df_client[df_client.ts < df_client.ts.max()]
 
 
 c1, c2 = st.columns((5, 1))
@@ -64,7 +67,7 @@ with st.sidebar:
 
     with c2 :
         if proba_churn > THRESHOLD:
-            message = '<p style="text-align: center;color:Red; font-size: 17px;">P = {:.2f} %.</p>'.format(proba_churn[0][0])
+            message = '<p style="text-align: center;color:Red; font-size: 17px;">P = {:.2f} %.</p>'.format(proba_churn[0][0]*100)
         else :
             message = '<p style="text-align: center;color:Green; font-size: 17px;">P = {:.2f} %.</p>'.format(proba_churn[0][0]*100)
         st.markdown(message, unsafe_allow_html=True)
